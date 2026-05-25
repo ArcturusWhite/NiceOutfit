@@ -645,7 +645,7 @@ export default function NiceOutfitApp() {
                 <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-ivory">
                   <Camera size={18} />
                   Upload or Take Photo
-                  <input className="sr-only" type="file" accept="image/*" capture="environment" onChange={handleImage} />
+                  <input className="sr-only" type="file" accept="image/*" onChange={handleImage} />
                 </label>
                 <p className="mt-3 text-center text-sm text-ink/55">Photos are kept on this device and styled into a consistent catalog card.</p>
               </section>
