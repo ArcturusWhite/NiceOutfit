@@ -9,6 +9,7 @@ import {
   Download,
   Home,
   Luggage,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -57,8 +58,15 @@ type WardrobeItem = {
   formality: Formality;
   styleTags: StyleTag[];
   notes: string;
-  image: string;
+  imageId: string;
   createdAt: string;
+  updatedAt?: string;
+  legacyImage?: string;
+};
+
+type DraftItem = Omit<WardrobeItem, "id" | "createdAt" | "updatedAt" | "legacyImage"> & {
+  imagePreview: string;
+  pendingImageData: string;
 };
 
 type OutfitContext = {
@@ -96,6 +104,9 @@ type NiceOutfitData = {
 };
 
 const STORAGE_KEY = "niceoutfit:data:v1";
+const IMAGE_DB_NAME = "niceoutfit-images";
+const IMAGE_STORE_NAME = "images";
+const IMAGE_DB_VERSION = 1;
 
 const categories: Category[] = [
   "tops",
@@ -118,7 +129,7 @@ const defaultFits: Fit[] = ["slim", "regular", "relaxed", "oversized", "tailored
 const defaultVibes: Vibe[] = ["casual", "elevated casual", "sporty", "lounge", "elegant", "classic", "streetwear", "minimal"];
 const colorFamilies = ["ivory", "cream", "beige", "camel", "gray", "black", "white", "navy", "denim", "rose", "brown", "olive", "burgundy"];
 
-const emptyDraft: Omit<WardrobeItem, "id" | "createdAt"> = {
+const emptyDraft: DraftItem = {
   name: "",
   category: "tops",
   subcategory: "",
@@ -132,7 +143,9 @@ const emptyDraft: Omit<WardrobeItem, "id" | "createdAt"> = {
   formality: "smart casual",
   styleTags: ["classic"],
   notes: "",
-  image: ""
+  imageId: "",
+  imagePreview: "",
+  pendingImageData: ""
 };
 
 const quickContexts: OutfitContext[] = [
@@ -267,6 +280,113 @@ function normalizeOptionList(value: unknown, fallback: string[] = []) {
   return selected.length ? [...new Set(selected)] : fallback;
 }
 
+function openImageDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB is not available"));
+      return;
+    }
+    const request = indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) db.createObjectStore(IMAGE_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function imageStoreAction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(IMAGE_STORE_NAME, mode);
+    const request = action(transaction.objectStore(IMAGE_STORE_NAME));
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => (typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Invalid image data")));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
+  const bytes = atob(base64 || "");
+  const array = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) array[index] = bytes.charCodeAt(index);
+  return new Blob([array], { type: mime });
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load image"));
+    image.src = src;
+  });
+}
+
+async function compressImageData(dataUrl: string): Promise<Blob> {
+  try {
+    const image = await loadImageElement(dataUrl);
+    const scale = Math.min(1, 800 / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return dataUrlToBlob(dataUrl);
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+    return blob || dataUrlToBlob(dataUrl);
+  } catch {
+    return dataUrlToBlob(dataUrl);
+  }
+}
+
+async function saveItemImage(dataUrl: string, imageId = uid()): Promise<string> {
+  if (!dataUrl) return "";
+  try {
+    const blob = await compressImageData(dataUrl);
+    await imageStoreAction(imageId ? "readwrite" : "readonly", (store) => store.put(blob, imageId));
+    return imageId;
+  } catch {
+    return "";
+  }
+}
+
+async function loadItemImage(imageId: string): Promise<string> {
+  if (!imageId) return "";
+  try {
+    const result = await imageStoreAction<Blob | undefined>("readonly", (store) => store.get(imageId));
+    return result instanceof Blob ? await blobToDataUrl(result) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function deleteItemImage(imageId: string) {
+  if (!imageId) return;
+  try {
+    await imageStoreAction<undefined>("readwrite", (store) => store.delete(imageId) as IDBRequest<undefined>);
+  } catch {
+    undefined;
+  }
+}
+
 function normalizeSeasons(value: unknown): Season[] {
   const raw = Array.isArray(value) ? value : value ? [value] : ["all-season"];
   const selected = raw
@@ -300,7 +420,7 @@ function normalizeContext(raw: unknown): OutfitContext {
 
 function normalizeWardrobeItem(raw: unknown, index = 0): WardrobeItem | null {
   if (!raw || typeof raw !== "object") return null;
-  const source = raw as Partial<WardrobeItem> & { season?: Season; fabric?: string; texture?: string; vibe?: string };
+  const source = raw as Partial<WardrobeItem> & { season?: Season; fabric?: string; texture?: string; vibe?: string; image?: string };
   return {
     id: safeString(source.id, `imported-${index}-${uid()}`),
     name: safeString(source.name, "Untitled item"),
@@ -316,8 +436,29 @@ function normalizeWardrobeItem(raw: unknown, index = 0): WardrobeItem | null {
     formality: normalize(source.formality) || "smart casual",
     styleTags: normalizeStyleList(source.styleTags),
     notes: safeString(source.notes),
-    image: safeString(source.image),
-    createdAt: safeString(source.createdAt, new Date().toISOString())
+    imageId: safeString(source.imageId),
+    legacyImage: safeString(source.legacyImage || source.image),
+    createdAt: safeString(source.createdAt, new Date().toISOString()),
+    updatedAt: safeString(source.updatedAt)
+  };
+}
+
+function stripVolatileItemFields(item: WardrobeItem): WardrobeItem {
+  const { legacyImage, image, imagePreview, pendingImageData, ...persistable } = item as WardrobeItem & {
+    image?: string;
+    imagePreview?: string;
+    pendingImageData?: string;
+  };
+  return persistable;
+}
+
+function stripVolatileOutfitFields<T extends Outfit>(outfit: T): T {
+  return {
+    ...outfit,
+    items: safeArray<unknown>(outfit.items)
+      .map((item, index) => normalizeWardrobeItem(item, index))
+      .filter((item): item is WardrobeItem => Boolean(item))
+      .map(stripVolatileItemFields)
   };
 }
 
@@ -620,6 +761,8 @@ export default function NiceOutfitApp() {
   const [wardrobe, setWardrobe] = useState<WardrobeItem[]>([]);
   const [savedOutfits, setSavedOutfits] = useState<SavedOutfit[]>([]);
   const [draft, setDraft] = useState(emptyDraft);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [imageMap, setImageMap] = useState<Record<string, string>>({});
   const [step, setStep] = useState(1);
   const [query, setQuery] = useState("");
   const [generated, setGenerated] = useState<Outfit[]>([]);
@@ -630,6 +773,7 @@ export default function NiceOutfitApp() {
   const [customVibes, setCustomVibes] = useState<Vibe[]>([]);
   const [customFormalities, setCustomFormalities] = useState<Formality[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [imageStorageReady, setImageStorageReady] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -650,12 +794,78 @@ export default function NiceOutfitApp() {
 
   useEffect(() => {
     if (!hydrated) return;
+    setImageStorageReady(false);
+    let cancelled = false;
+    const migrateAndLoadImages = async () => {
+      const nextItems: WardrobeItem[] = [];
+      const nextSavedOutfits: SavedOutfit[] = [];
+      const nextImages: Record<string, string> = {};
+      let changed = false;
+      for (const item of wardrobe) {
+        let nextItem = item;
+        if (!nextItem.imageId && nextItem.legacyImage) {
+          const imageId = await saveItemImage(nextItem.legacyImage);
+          if (imageId) {
+            nextItem = { ...nextItem, imageId, legacyImage: "" };
+            changed = true;
+          }
+        }
+        if (nextItem.imageId) {
+          const image = await loadItemImage(nextItem.imageId);
+          if (image) nextImages[nextItem.imageId] = image;
+        }
+        nextItems.push(nextItem);
+      }
+      for (const outfit of savedOutfits) {
+        const outfitItems: WardrobeItem[] = [];
+        for (const item of safeArray<unknown>(outfit.items).map((entry, index) => normalizeWardrobeItem(entry, index)).filter((entry): entry is WardrobeItem => Boolean(entry))) {
+          let nextItem = item;
+          if (!nextItem.imageId && nextItem.legacyImage) {
+            const imageId = await saveItemImage(nextItem.legacyImage);
+            if (imageId) {
+              nextItem = { ...nextItem, imageId, legacyImage: "" };
+              changed = true;
+            }
+          }
+          if (nextItem.imageId && !nextImages[nextItem.imageId]) {
+            const image = await loadItemImage(nextItem.imageId);
+            if (image) nextImages[nextItem.imageId] = image;
+          }
+          outfitItems.push(nextItem);
+        }
+        nextSavedOutfits.push({ ...outfit, items: outfitItems });
+      }
+      if (cancelled) return;
+      setImageMap(nextImages);
+      if (changed) setWardrobe(nextItems);
+      if (changed) setSavedOutfits(nextSavedOutfits.map(stripVolatileOutfitFields));
+      setImageStorageReady(true);
+    };
+    migrateAndLoadImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [wardrobe, savedOutfits, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !imageStorageReady) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities }));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          wardrobe: wardrobe.map(stripVolatileItemFields),
+          savedOutfits: savedOutfits.map(stripVolatileOutfitFields),
+          customStyleTags,
+          customTextures,
+          customFits,
+          customVibes,
+          customFormalities
+        })
+      );
     } catch {
       undefined;
     }
-  }, [wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities, hydrated]);
+  }, [wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities, hydrated, imageStorageReady]);
 
   const filteredWardrobe = useMemo(
     () => (activeFilter === "all" ? wardrobe : wardrobe.filter((item) => item.category === activeFilter)),
@@ -669,7 +879,7 @@ export default function NiceOutfitApp() {
   const selectableVibes = useMemo(() => [...new Set([...defaultVibes, ...customVibes])], [customVibes]);
   const selectableFormalities = useMemo(() => [...new Set([...defaultFormalities, ...customFormalities])], [customFormalities]);
 
-  const updateDraft = (field: keyof typeof emptyDraft, value: string | string[]) => {
+  const updateDraft = (field: keyof DraftItem, value: string | string[]) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
 
@@ -686,9 +896,9 @@ export default function NiceOutfitApp() {
     }
     try {
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
         if (typeof reader.result !== "string") return;
-        setDraft((current) => ({ ...current, image: reader.result }));
+        setDraft((current) => ({ ...current, imagePreview: reader.result, pendingImageData: reader.result }));
         setStep(2);
       };
       reader.onerror = () => {
@@ -702,11 +912,21 @@ export default function NiceOutfitApp() {
     }
   };
 
-  const saveItem = () => {
-    if (!draft.image || !draft.name.trim()) return;
+  const saveItem = async () => {
+    if ((!draft.imagePreview && !draft.imageId) || !draft.name.trim()) return;
+    const existing = editingItemId ? wardrobe.find((item) => item.id === editingItemId) : undefined;
+    let imageId = draft.imageId || existing?.imageId || "";
+    if (draft.pendingImageData) {
+      const replacementId = await saveItemImage(draft.pendingImageData, imageId || uid());
+      if (replacementId) imageId = replacementId;
+      if (!replacementId) {
+        alert("NiceOutfit could not save that image on this device. Please try another photo.");
+        return;
+      }
+    }
     const item: WardrobeItem = {
       ...draft,
-      id: uid(),
+      id: editingItemId || uid(),
       name: draft.name.trim(),
       subcategory: draft.subcategory.trim(),
       mainColor: draft.mainColor.trim() || "neutral",
@@ -715,10 +935,14 @@ export default function NiceOutfitApp() {
       textures: draft.textures.length ? draft.textures : ["smooth"],
       fit: draft.fit,
       vibes: draft.vibes.length ? draft.vibes : ["classic"],
-      createdAt: new Date().toISOString()
+      imageId,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: editingItemId ? new Date().toISOString() : undefined
     };
-    setWardrobe((items) => [item, ...items]);
+    const persistable = stripVolatileItemFields(item);
+    setWardrobe((items) => (editingItemId ? items.map((entry) => (entry.id === editingItemId ? persistable : entry)) : [persistable, ...items]));
     setDraft(emptyDraft);
+    setEditingItemId(null);
     setStep(1);
     setView("wardrobe");
   };
@@ -730,11 +954,84 @@ export default function NiceOutfitApp() {
 
   const saveOutfit = (outfit: Outfit) => {
     if (savedOutfits.some((saved) => saved.id === outfit.id)) return;
-    setSavedOutfits((items) => [{ ...outfit, savedAt: new Date().toISOString() }, ...items]);
+    setSavedOutfits((items) => [stripVolatileOutfitFields({ ...outfit, savedAt: new Date().toISOString() }), ...items]);
   };
 
-  const exportBackup = () => {
-    const blob = new Blob([JSON.stringify({ wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities }, null, 2)], { type: "application/json" });
+  const startEditItem = (item: WardrobeItem) => {
+    const safeItem = normalizeWardrobeItem(item);
+    if (!safeItem) return;
+    setEditingItemId(safeItem.id);
+    setDraft({
+      name: safeItem.name,
+      category: safeItem.category,
+      subcategory: safeItem.subcategory,
+      mainColor: safeItem.mainColor,
+      secondaryColor: safeItem.secondaryColor,
+      material: safeItem.material,
+      seasons: safeItem.seasons,
+      textures: safeItem.textures,
+      fit: safeItem.fit,
+      vibes: safeItem.vibes,
+      formality: safeItem.formality,
+      styleTags: safeItem.styleTags,
+      notes: safeItem.notes,
+      imageId: safeItem.imageId,
+      imagePreview: imageMap[safeItem.imageId] || "",
+      pendingImageData: ""
+    });
+    setStep(2);
+    setView("add");
+  };
+
+  const startAddItem = () => {
+    setEditingItemId(null);
+    setDraft(emptyDraft);
+    setStep(1);
+    setView("add");
+  };
+
+  const deleteWardrobeItem = async (item: WardrobeItem) => {
+    const imageId = item.imageId;
+    setWardrobe((items) => items.filter((entry) => entry.id !== item.id));
+    if (imageId) {
+      await deleteItemImage(imageId);
+      setImageMap((images) => {
+        const next = { ...images };
+        delete next[imageId];
+        return next;
+      });
+    }
+  };
+
+  const exportBackup = async () => {
+    const images: Record<string, string> = {};
+    const exportItems = [
+      ...wardrobe,
+      ...savedOutfits.flatMap((outfit) => safeArray<unknown>(outfit.items).map((item, index) => normalizeWardrobeItem(item, index)).filter((item): item is WardrobeItem => Boolean(item)))
+    ];
+    for (const item of exportItems) {
+      if (!item.imageId || images[item.imageId]) continue;
+      images[item.imageId] = imageMap[item.imageId] || (await loadItemImage(item.imageId));
+    }
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            wardrobe: wardrobe.map(stripVolatileItemFields),
+            savedOutfits: savedOutfits.map(stripVolatileOutfitFields),
+            customStyleTags,
+            customTextures,
+            customFits,
+            customVibes,
+            customFormalities,
+            images
+          },
+          null,
+          2
+        )
+      ],
+      { type: "application/json" }
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -751,7 +1048,7 @@ export default function NiceOutfitApp() {
     }
     try {
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
       try {
         const raw = JSON.parse(String(reader.result));
         const data = {
@@ -769,13 +1066,28 @@ export default function NiceOutfitApp() {
           customVibes: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customVibes).filter((entry) => !defaultVibes.includes(entry)),
           customFormalities: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customFormalities).filter((entry) => !defaultFormalities.includes(entry))
         };
+        const importedImages = raw && typeof raw === "object" ? ((raw as { images?: Record<string, string> }).images || {}) : {};
+        const restoredImages: Record<string, string> = {};
+        const importItems = [...data.wardrobe, ...data.savedOutfits.flatMap((outfit) => outfit.items)];
+        for (const item of importItems) {
+          const imageData = (item.imageId && importedImages[item.imageId]) || item.legacyImage || "";
+          if (!imageData) continue;
+          const imageId = item.imageId || uid();
+          const savedImageId = await saveItemImage(imageData, imageId);
+          if (savedImageId) {
+            item.imageId = savedImageId;
+            item.legacyImage = "";
+            restoredImages[savedImageId] = await loadItemImage(savedImageId);
+          }
+        }
         const assignedTags = data.wardrobe.flatMap((item) => item.styleTags).filter((tag) => !defaultStyleTags.includes(tag) && tag !== "parisian");
         const assignedTextures = data.wardrobe.flatMap((item) => item.textures).filter((tag) => !defaultTextures.includes(tag));
         const assignedFits = data.wardrobe.map((item) => item.fit).filter((tag) => !defaultFits.includes(tag));
         const assignedVibes = data.wardrobe.flatMap((item) => item.vibes).filter((tag) => !defaultVibes.includes(tag));
         const assignedFormalities = data.wardrobe.map((item) => item.formality).filter((tag) => !defaultFormalities.includes(tag));
-        setWardrobe(data.wardrobe);
-        setSavedOutfits(data.savedOutfits);
+        setWardrobe(data.wardrobe.map(stripVolatileItemFields));
+        setSavedOutfits(data.savedOutfits.map(stripVolatileOutfitFields));
+        setImageMap(restoredImages);
         setCustomStyleTags([...new Set([...data.customStyleTags, ...assignedTags])]);
         setCustomTextures([...new Set([...data.customTextures, ...assignedTextures])]);
         setCustomFits([...new Set([...data.customFits, ...assignedFits])]);
@@ -799,6 +1111,9 @@ export default function NiceOutfitApp() {
 
   const resetData = () => {
     if (!confirm("Reset all NiceOutfit data on this device?")) return;
+    wardrobe.forEach((item) => {
+      if (item.imageId) deleteItemImage(item.imageId);
+    });
     setWardrobe([]);
     setSavedOutfits([]);
     setCustomStyleTags([]);
@@ -807,6 +1122,7 @@ export default function NiceOutfitApp() {
     setCustomVibes([]);
     setCustomFormalities([]);
     setGenerated([]);
+    setImageMap({});
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -850,7 +1166,7 @@ export default function NiceOutfitApp() {
             </section>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <ActionButton icon={Plus} label="Add Item" onClick={() => setView("add")} />
+              <ActionButton icon={Plus} label="Add Item" onClick={startAddItem} />
               <ActionButton icon={Wand2} label="Generate" onClick={() => setView("generate")} />
               <ActionButton icon={Download} label="Backup" onClick={exportBackup} />
             </div>
@@ -863,9 +1179,9 @@ export default function NiceOutfitApp() {
                 </button>
               </div>
               {featured ? (
-                <OutfitCard outfit={featured} onSave={saveOutfit} saved={savedOutfits.some((item) => item.id === featured.id)} />
+                <OutfitCard outfit={featured} imageMap={imageMap} onSave={saveOutfit} saved={savedOutfits.some((item) => item.id === featured.id)} />
               ) : (
-                <EmptyState title="Build your first outfit" body="Add a few pieces, then NiceOutfit can suggest looks from what you already own." action="Add an item" onClick={() => setView("add")} />
+                <EmptyState title="Build your first outfit" body="Add a few pieces, then NiceOutfit can suggest looks from what you already own." action="Add an item" onClick={startAddItem} />
               )}
             </section>
 
@@ -874,7 +1190,7 @@ export default function NiceOutfitApp() {
               {wardrobe.length ? (
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                   {wardrobe.slice(0, 4).map((item) => (
-                    <ItemCard key={item.id} item={item} />
+                    <ItemCard key={item.id} item={item} imageSrc={imageMap[item.imageId]} />
                   ))}
                 </div>
               ) : (
@@ -903,21 +1219,21 @@ export default function NiceOutfitApp() {
             {filteredWardrobe.length ? (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {filteredWardrobe.map((item) => (
-                  <ItemCard key={item.id} item={item} onDelete={() => setWardrobe((items) => items.filter((entry) => entry.id !== item.id))} />
+                  <ItemCard key={item.id} item={item} imageSrc={imageMap[item.imageId]} onEdit={() => startEditItem(item)} onDelete={() => deleteWardrobeItem(item)} />
                 ))}
               </div>
             ) : (
-              <EmptyState title="No pieces here yet" body="Upload clothing and accessories to create a clean, searchable catalog." action="Add item" onClick={() => setView("add")} />
+              <EmptyState title="No pieces here yet" body="Upload clothing and accessories to create a clean, searchable catalog." action="Add item" onClick={startAddItem} />
             )}
           </div>
         )}
 
         {view === "add" && (
           <div className="space-y-5">
-            <PageTitle eyebrow={`Step ${step} of 4`} title="Add Item" />
+            <PageTitle eyebrow={`Step ${step} of 4`} title={editingItemId ? "Edit Item" : "Add Item"} />
             <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
               <section className="rounded-[1.5rem] bg-porcelain p-4 shadow-soft">
-                <CatalogPreview image={draft.image} name={draft.name || "New wardrobe item"} />
+                <CatalogPreview image={draft.imagePreview} name={draft.name || "New wardrobe item"} />
                 <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-ivory">
                   <Camera size={18} />
                   Upload or Take Photo
@@ -986,11 +1302,11 @@ export default function NiceOutfitApp() {
                 </label>
                 <button
                   onClick={saveItem}
-                  disabled={!draft.image || !draft.name.trim()}
+                  disabled={(!draft.imagePreview && !draft.imageId) || !draft.name.trim()}
                   className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-rose px-5 py-3 font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:bg-taupe"
                 >
                   <Check size={18} />
-                  Save Item
+                  {editingItemId ? "Save Changes" : "Save Item"}
                 </button>
               </section>
             </div>
@@ -1037,7 +1353,7 @@ export default function NiceOutfitApp() {
             <section className="space-y-4">
               {generated.length ? (
                 generated.map((outfit) => (
-                  <OutfitCard key={outfit.id} outfit={outfit} onSave={saveOutfit} saved={savedOutfits.some((item) => item.id === outfit.id)} />
+                  <OutfitCard key={outfit.id} outfit={outfit} imageMap={imageMap} onSave={saveOutfit} saved={savedOutfits.some((item) => item.id === outfit.id)} />
                 ))
               ) : (
                 <EmptyState title="Ready when your wardrobe is" body="Choose a quick idea or describe the plan. NiceOutfit will infer formality, season, and style from local rules." action="Try Work" onClick={() => runRecommendation(quickContexts[0])} />
@@ -1061,6 +1377,7 @@ export default function NiceOutfitApp() {
                   <OutfitCard
                     key={outfit.id}
                     outfit={outfit}
+                    imageMap={imageMap}
                     saved
                     savedAt={outfit.savedAt}
                     onDelete={() => setSavedOutfits((items) => items.filter((item) => item.id !== outfit.id))}
@@ -1080,7 +1397,7 @@ export default function NiceOutfitApp() {
           {navItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setView(id)}
+              onClick={() => (id === "add" ? startAddItem() : setView(id))}
               className={`flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-semibold ${
                 view === id ? "bg-ink text-ivory" : "text-ink/60"
               }`}
@@ -1141,23 +1458,30 @@ function CatalogPreview({ image, name }: { image?: string; name: string }) {
   );
 }
 
-function ItemCard({ item, onDelete }: { item: WardrobeItem; onDelete?: () => void }) {
+function ItemCard({ item, imageSrc, onDelete, onEdit }: { item: WardrobeItem; imageSrc?: string; onDelete?: () => void; onEdit?: () => void }) {
   const safeItem = normalizeWardrobeItem(item) ?? normalizeWardrobeItem({}, 0);
   if (!safeItem) return null;
   return (
     <article className="rounded-[1.35rem] bg-white p-3 shadow-soft">
-      <CatalogPreview image={safeItem.image} name={safeItem.name || "Wardrobe item"} />
+      <CatalogPreview image={imageSrc || safeItem.legacyImage} name={safeItem.name || "Wardrobe item"} />
       <div className="mt-3">
         <div className="flex items-start justify-between gap-2">
           <div>
             <h3 className="font-semibold leading-tight">{safeItem.name}</h3>
             <p className="text-sm text-ink/55">{titleCase(safeItem.category)}</p>
           </div>
-          {onDelete && (
-            <button onClick={onDelete} className="grid size-8 shrink-0 place-items-center rounded-full bg-ivory text-ink/60" aria-label={`Delete ${safeItem.name}`}>
-              <Trash2 size={15} />
-            </button>
-          )}
+          <div className="flex shrink-0 gap-1">
+            {onEdit && (
+              <button onClick={onEdit} className="grid size-8 place-items-center rounded-full bg-ivory text-ink/60" aria-label={`Edit ${safeItem.name}`}>
+                <Pencil size={15} />
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} className="grid size-8 place-items-center rounded-full bg-ivory text-ink/60" aria-label={`Delete ${safeItem.name}`}>
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
           {[safeItem.mainColor, safeItem.formality, safeItem.seasons.join(" + "), safeItem.textures.join(" + "), safeItem.vibes.join(" + ")].filter(Boolean).map((tag) => (
@@ -1173,6 +1497,7 @@ function ItemCard({ item, onDelete }: { item: WardrobeItem; onDelete?: () => voi
 
 function OutfitCard({
   outfit,
+  imageMap,
   onSave,
   saved,
   savedAt,
@@ -1180,6 +1505,7 @@ function OutfitCard({
   onRegenerate
 }: {
   outfit: Outfit;
+  imageMap?: Record<string, string>;
   onSave?: (outfit: Outfit) => void;
   saved?: boolean;
   savedAt?: string;
@@ -1206,7 +1532,7 @@ function OutfitCard({
       <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
         {safeItems.map((item) => (
           <div key={item.id}>
-            <CatalogPreview image={item.image} name={item.name || "Outfit item"} />
+            <CatalogPreview image={imageMap?.[item.imageId] || item.legacyImage} name={item.name || "Outfit item"} />
             <p className="mt-1 truncate text-xs font-semibold">{item.name}</p>
           </div>
         ))}
