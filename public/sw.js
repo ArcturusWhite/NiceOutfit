@@ -1,4 +1,4 @@
-const CACHE_NAME = "niceoutfit-v2";
+const CACHE_NAME = "niceoutfit-v3";
 const APP_SHELL = ["/", "/manifest.json", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

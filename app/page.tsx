@@ -36,12 +36,11 @@ type Category =
   | "jewelry"
   | "other accessories";
 type Season = "spring" | "summer" | "fall" | "winter" | "all-season";
-type Formality = "casual" | "smart casual" | "work" | "formal";
+type Formality = string;
 type StyleTag = string;
-type WeatherTag = "hot" | "cold" | "rainy" | "windy" | "mild";
-type Texture = "matte" | "smooth" | "ribbed" | "knit" | "structured" | "soft" | "shiny" | "flowy" | "rugged" | "lounge" | "crisp";
-type Fit = "slim" | "regular" | "relaxed" | "oversized" | "tailored" | "wide-leg";
-type Vibe = "casual" | "elevated casual" | "sporty" | "lounge" | "elegant" | "classic" | "streetwear" | "minimal";
+type Texture = string;
+type Fit = string;
+type Vibe = string;
 
 type WardrobeItem = {
   id: string;
@@ -52,12 +51,11 @@ type WardrobeItem = {
   secondaryColor: string;
   material: string;
   seasons: Season[];
-  texture: Texture;
+  textures: Texture[];
   fit: Fit;
-  vibe: Vibe;
+  vibes: Vibe[];
   formality: Formality;
   styleTags: StyleTag[];
-  weatherTags: WeatherTag[];
   notes: string;
   image: string;
   createdAt: string;
@@ -66,7 +64,6 @@ type WardrobeItem = {
 type OutfitContext = {
   label: string;
   occasion: string;
-  weather: WeatherTag[];
   season?: Season;
   styles: StyleTag[];
   formality?: Formality;
@@ -92,6 +89,10 @@ type NiceOutfitData = {
   wardrobe: WardrobeItem[];
   savedOutfits: SavedOutfit[];
   customStyleTags: StyleTag[];
+  customTextures: Texture[];
+  customFits: Fit[];
+  customVibes: Vibe[];
+  customFormalities: Formality[];
 };
 
 const STORAGE_KEY = "niceoutfit:data:v1";
@@ -110,12 +111,11 @@ const categories: Category[] = [
   "other accessories"
 ];
 const seasons: Season[] = ["spring", "summer", "fall", "winter", "all-season"];
-const formalities: Formality[] = ["casual", "smart casual", "work", "formal"];
+const defaultFormalities: Formality[] = ["casual", "smart casual", "work", "formal"];
 const defaultStyleTags: StyleTag[] = ["minimalist", "elegant", "sporty", "classic", "romantic", "relaxed", "edgy", "streetwear", "elevated casual"];
-const weatherTags: WeatherTag[] = ["hot", "cold", "rainy", "windy", "mild"];
-const textureOptions: Texture[] = ["matte", "smooth", "ribbed", "knit", "structured", "soft", "shiny", "flowy", "rugged", "lounge", "crisp"];
-const fitOptions: Fit[] = ["slim", "regular", "relaxed", "oversized", "tailored", "wide-leg"];
-const vibeOptions: Vibe[] = ["casual", "elevated casual", "sporty", "lounge", "elegant", "classic", "streetwear", "minimal"];
+const defaultTextures: Texture[] = ["matte", "smooth", "ribbed", "knit", "structured", "soft", "shiny", "flowy", "rugged", "lounge", "crisp"];
+const defaultFits: Fit[] = ["slim", "regular", "relaxed", "oversized", "tailored", "wide-leg"];
+const defaultVibes: Vibe[] = ["casual", "elevated casual", "sporty", "lounge", "elegant", "classic", "streetwear", "minimal"];
 const colorFamilies = ["ivory", "cream", "beige", "camel", "gray", "black", "white", "navy", "denim", "rose", "brown", "olive", "burgundy"];
 
 const emptyDraft: Omit<WardrobeItem, "id" | "createdAt"> = {
@@ -126,12 +126,11 @@ const emptyDraft: Omit<WardrobeItem, "id" | "createdAt"> = {
   secondaryColor: "",
   material: "",
   seasons: ["all-season"],
-  texture: "smooth",
+  textures: ["smooth"],
   fit: "regular",
-  vibe: "classic",
+  vibes: ["classic"],
   formality: "smart casual",
   styleTags: ["classic"],
-  weatherTags: ["mild"],
   notes: "",
   image: ""
 };
@@ -140,7 +139,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Work",
     occasion: "work",
-    weather: ["mild"],
     season: "all-season",
     styles: ["classic", "minimalist", "elegant"],
     formality: "work",
@@ -150,7 +148,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Casual",
     occasion: "casual day",
-    weather: ["mild"],
     styles: ["relaxed", "classic", "sporty"],
     formality: "casual",
     colors: ["denim", "white", "gray", "beige"],
@@ -159,7 +156,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Formal",
     occasion: "formal event",
-    weather: ["mild"],
     styles: ["elegant", "classic", "romantic"],
     formality: "formal",
     colors: ["black", "ivory", "navy", "burgundy"],
@@ -168,7 +164,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Smart Casual",
     occasion: "smart casual plan",
-    weather: ["mild"],
     styles: ["minimalist", "classic", "elegant"],
     formality: "smart casual",
     colors: ["beige", "camel", "white", "gray", "black"],
@@ -177,7 +172,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Travel",
     occasion: "travel day",
-    weather: ["mild", "windy"],
     styles: ["relaxed", "minimalist", "classic"],
     formality: "casual",
     colors: ["black", "gray", "beige", "denim"],
@@ -186,7 +180,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Dinner",
     occasion: "dinner",
-    weather: ["mild"],
     styles: ["elegant", "romantic", "classic"],
     formality: "smart casual",
     colors: ["black", "rose", "ivory", "burgundy"],
@@ -195,7 +188,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Parisian Winter",
     occasion: "Paris in winter",
-    weather: ["cold", "windy"],
     season: "winter",
     styles: ["parisian", "elegant", "classic"],
     formality: "smart casual",
@@ -205,7 +197,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Hot Weather",
     occasion: "hot weather",
-    weather: ["hot"],
     season: "summer",
     styles: ["relaxed", "minimalist", "classic"],
     formality: "casual",
@@ -215,7 +206,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Rainy Day",
     occasion: "rainy day",
-    weather: ["rainy", "mild"],
     styles: ["classic", "minimalist"],
     formality: "smart casual",
     colors: ["black", "gray", "navy", "olive"],
@@ -224,7 +214,6 @@ const quickContexts: OutfitContext[] = [
   {
     label: "Weekend",
     occasion: "weekend",
-    weather: ["mild"],
     styles: ["relaxed", "sporty", "classic"],
     formality: "casual",
     colors: ["denim", "white", "beige", "olive"],
@@ -244,7 +233,15 @@ const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const titleCase = (value: string) => value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 const overlaps = <T,>(a: T[], b: T[]) => a.some((item) => b.includes(item));
 const normalize = (value: unknown) => String(value ?? "").trim().toLowerCase();
-const fallbackData: NiceOutfitData = { wardrobe: [], savedOutfits: [], customStyleTags: [] };
+const fallbackData: NiceOutfitData = {
+  wardrobe: [],
+  savedOutfits: [],
+  customStyleTags: [],
+  customTextures: [],
+  customFits: [],
+  customVibes: [],
+  customFormalities: []
+};
 const formatDate = (value?: string) => {
   if (!value) return "";
   const date = new Date(value);
@@ -264,6 +261,12 @@ function oneOf<T extends string>(value: unknown, options: readonly T[], fallback
   return options.includes(normalized as T) ? (normalized as T) : fallback;
 }
 
+function normalizeOptionList(value: unknown, fallback: string[] = []) {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const selected = raw.map((entry) => normalize(entry)).filter(Boolean);
+  return selected.length ? [...new Set(selected)] : fallback;
+}
+
 function normalizeSeasons(value: unknown): Season[] {
   const raw = Array.isArray(value) ? value : value ? [value] : ["all-season"];
   const selected = raw
@@ -280,26 +283,16 @@ function normalizeStyleList(value: unknown): StyleTag[] {
   return selected.length ? [...new Set(selected)] : ["classic"];
 }
 
-function normalizeWeatherList(value: unknown): WeatherTag[] {
-  const raw = Array.isArray(value) ? value : value ? [value] : [];
-  const selected = raw
-    .map((entry) => normalize(entry))
-    .filter((entry): entry is WeatherTag => weatherTags.includes(entry as WeatherTag));
-  return selected.length ? [...new Set(selected)] : ["mild"];
-}
-
 function normalizeContext(raw: unknown): OutfitContext {
   const source = raw && typeof raw === "object" ? (raw as Partial<OutfitContext>) : {};
-  const weather = normalizeWeatherList(source.weather);
   const colors = safeArray<unknown>(source.colors).map((entry) => normalize(entry)).filter(Boolean);
   const include = safeArray<unknown>(source.include).filter((entry): entry is Category => categories.includes(entry as Category));
   return {
     label: safeString(source.label, "Custom"),
     occasion: safeString(source.occasion, "saved outfit"),
-    weather,
     season: seasons.includes(normalize(source.season) as Season) ? (normalize(source.season) as Season) : undefined,
     styles: normalizeStyleList(source.styles),
-    formality: formalities.includes(normalize(source.formality) as Formality) ? (normalize(source.formality) as Formality) : undefined,
+    formality: normalize(source.formality) || undefined,
     colors: colors.length ? colors : ["ivory", "beige", "black", "gray"],
     include: include.length ? include : categories
   };
@@ -307,7 +300,7 @@ function normalizeContext(raw: unknown): OutfitContext {
 
 function normalizeWardrobeItem(raw: unknown, index = 0): WardrobeItem | null {
   if (!raw || typeof raw !== "object") return null;
-  const source = raw as Partial<WardrobeItem> & { season?: Season; fabric?: string };
+  const source = raw as Partial<WardrobeItem> & { season?: Season; fabric?: string; texture?: string; vibe?: string };
   return {
     id: safeString(source.id, `imported-${index}-${uid()}`),
     name: safeString(source.name, "Untitled item"),
@@ -317,12 +310,11 @@ function normalizeWardrobeItem(raw: unknown, index = 0): WardrobeItem | null {
     secondaryColor: safeString(source.secondaryColor),
     material: safeString(source.material || source.fabric),
     seasons: normalizeSeasons(source.seasons || source.season),
-    texture: oneOf(source.texture, textureOptions, "smooth"),
-    fit: oneOf(source.fit, fitOptions, "regular"),
-    vibe: oneOf(source.vibe, vibeOptions, "classic"),
-    formality: oneOf(source.formality, formalities, "smart casual"),
+    textures: normalizeOptionList(source.textures || source.texture, ["smooth"]),
+    fit: normalize(source.fit) || "regular",
+    vibes: normalizeOptionList(source.vibes || source.vibe, ["classic"]),
+    formality: normalize(source.formality) || "smart casual",
     styleTags: normalizeStyleList(source.styleTags),
-    weatherTags: normalizeWeatherList(source.weatherTags),
     notes: safeString(source.notes),
     image: safeString(source.image),
     createdAt: safeString(source.createdAt, new Date().toISOString())
@@ -360,13 +352,25 @@ function readStoredData(): NiceOutfitData {
       .map((outfit, index) => normalizeSavedOutfit(outfit, index))
       .filter((outfit): outfit is SavedOutfit => Boolean(outfit));
     const assignedTags = wardrobe.flatMap((item) => item.styleTags);
+    const assignedTextures = wardrobe.flatMap((item) => item.textures);
+    const assignedFits = wardrobe.map((item) => item.fit);
+    const assignedVibes = wardrobe.flatMap((item) => item.vibes);
+    const assignedFormalities = wardrobe.map((item) => item.formality);
     const customStyleTags = safeArray<unknown>(parsed.customStyleTags)
       .map((entry) => normalize(entry))
       .filter((entry) => entry && !defaultStyleTags.includes(entry));
+    const customTextures = normalizeOptionList(parsed.customTextures).filter((entry) => !defaultTextures.includes(entry));
+    const customFits = normalizeOptionList(parsed.customFits).filter((entry) => !defaultFits.includes(entry));
+    const customVibes = normalizeOptionList(parsed.customVibes).filter((entry) => !defaultVibes.includes(entry));
+    const customFormalities = normalizeOptionList(parsed.customFormalities).filter((entry) => !defaultFormalities.includes(entry));
     return {
       wardrobe,
       savedOutfits,
-      customStyleTags: [...new Set([...customStyleTags, ...assignedTags.filter((tag) => !defaultStyleTags.includes(tag) && tag !== "parisian")])]
+      customStyleTags: [...new Set([...customStyleTags, ...assignedTags.filter((tag) => !defaultStyleTags.includes(tag) && tag !== "parisian")])],
+      customTextures: [...new Set([...customTextures, ...assignedTextures.filter((item) => !defaultTextures.includes(item))])],
+      customFits: [...new Set([...customFits, ...assignedFits.filter((item) => !defaultFits.includes(item))])],
+      customVibes: [...new Set([...customVibes, ...assignedVibes.filter((item) => !defaultVibes.includes(item))])],
+      customFormalities: [...new Set([...customFormalities, ...assignedFormalities.filter((item) => !defaultFormalities.includes(item))])]
     };
   } catch {
     return fallbackData;
@@ -378,7 +382,6 @@ function parseSituation(input: string): OutfitContext {
   const base: OutfitContext = {
     label: input.trim() || "Custom",
     occasion: "custom plan",
-    weather: ["mild"],
     styles: ["classic"],
     colors: ["ivory", "beige", "black", "gray"],
     include: ["tops", "bottoms", "dresses", "outerwear", "shoes", "bags", "jewelry", "scarves", "belts", "ties"]
@@ -392,20 +395,16 @@ function parseSituation(input: string): OutfitContext {
   }
   if (text.includes("winter") || text.includes("cold")) {
     base.season = "winter";
-    base.weather = ["cold", "windy"];
     base.include = [...new Set([...base.include, "outerwear" as Category, "scarves" as Category])];
   }
   if (text.includes("summer") || text.includes("hot") || text.includes("beach")) {
     base.season = "summer";
-    base.weather = ["hot"];
     base.styles = [...new Set([...base.styles, "relaxed" as StyleTag, "minimalist" as StyleTag])];
     base.colors = ["white", "ivory", "beige", "rose"];
   }
   if (text.includes("rain")) {
-    base.weather = ["rainy", "mild"];
     base.include = [...new Set([...base.include, "outerwear" as Category])];
   }
-  if (text.includes("wind")) base.weather = [...new Set([...base.weather, "windy" as WeatherTag])];
   if (text.includes("work") || text.includes("office")) {
     base.formality = "work";
     base.occasion = "work";
@@ -460,31 +459,31 @@ function materialHarmonyScore(items: WardrobeItem[]) {
   if (has("wool") && has("leather")) score += 8;
   if (has("denim") && has("cotton")) score += 7;
   if (has("linen") && has("cotton")) score += 6;
-  if ((has("wool") || has("heavy")) && safeItems.some((item) => normalizeWeatherList(item.weatherTags).includes("hot"))) score -= 10;
+  if ((has("wool") || has("heavy")) && safeItems.some((item) => item.seasons.includes("summer"))) score -= 6;
   if (has("synthetic") || has("polyester")) {
-    if (safeItems.some((item) => item.vibe === "elegant" && item.formality === "formal")) score -= 6;
+    if (safeItems.some((item) => item.vibes.includes("elegant") && item.formality === "formal")) score -= 6;
   }
   return score;
 }
 
 function textureHarmonyScore(items: WardrobeItem[]) {
   const safeItems = Array.isArray(items) ? items : [];
-  const textures = safeItems.map((item) => item.texture);
+  const textures = safeItems.flatMap((item) => item.textures);
   const has = (texture: Texture) => textures.includes(texture);
   let score = 0;
   if (has("knit") && (has("soft") || safeItems.some((item) => item.fit === "relaxed"))) score += 8;
   if (has("structured") && safeItems.some((item) => item.fit === "tailored")) score += 9;
   if (has("crisp") && (has("smooth") || has("structured"))) score += 7;
-  if (has("flowy") && safeItems.some((item) => item.vibe === "elegant" || normalizeStyleList(item.styleTags).includes("romantic"))) score += 7;
+  if (has("flowy") && safeItems.some((item) => item.vibes.includes("elegant") || normalizeStyleList(item.styleTags).includes("romantic"))) score += 7;
   if (has("lounge") && has("shiny")) score -= 10;
-  if (has("rugged") && has("flowy") && !safeItems.some((item) => item.vibe === "streetwear" || normalizeStyleList(item.styleTags).includes("edgy"))) score -= 7;
+  if (has("rugged") && has("flowy") && !safeItems.some((item) => item.vibes.includes("streetwear") || normalizeStyleList(item.styleTags).includes("edgy"))) score -= 7;
   return score;
 }
 
 function vibeHarmonyScore(items: WardrobeItem[], context: OutfitContext) {
   const safeItems = Array.isArray(items) ? items : [];
   const safeContext = normalizeContext(context);
-  const vibes = safeItems.map((item) => item.vibe);
+  const vibes = safeItems.flatMap((item) => item.vibes);
   let score = 0;
   if (vibes.some((vibe) => safeContext.styles.includes(vibe))) score += 8;
   if (vibes.every((vibe) => ["classic", "minimal", "elegant", "elevated casual"].includes(vibe))) score += 6;
@@ -505,13 +504,10 @@ function itemFitScore(item: WardrobeItem, context: OutfitContext) {
   if (safeContext.formality && safeItem.formality === safeContext.formality) score += 18;
   if (safeContext.formality === "smart casual" && ["casual", "work"].includes(safeItem.formality)) score += 8;
   if (!safeContext.formality) score += 8;
-  if (overlaps(safeItem.weatherTags, safeContext.weather)) score += 18;
   if (overlaps(safeItem.styleTags, safeContext.styles)) score += 18;
-  if (safeContext.styles.includes(safeItem.vibe)) score += 10;
-  if (safeItem.texture === "structured" && ["work", "formal"].includes(safeContext.formality ?? "")) score += 6;
-  if (safeItem.texture === "lounge" && ["work", "formal"].includes(safeContext.formality ?? "")) score -= 8;
-  if (safeContext.weather.includes("hot") && ["knit", "rugged", "structured"].includes(safeItem.texture)) score -= 6;
-  if (safeContext.weather.includes("cold") && ["knit", "soft", "structured"].includes(safeItem.texture)) score += 6;
+  if (overlaps(safeItem.vibes, safeContext.styles)) score += 10;
+  if (safeItem.textures.includes("structured") && ["work", "formal"].includes(safeContext.formality ?? "")) score += 6;
+  if (safeItem.textures.includes("lounge") && ["work", "formal"].includes(safeContext.formality ?? "")) score -= 8;
   if (safeContext.include.includes(safeItem.category)) score += 8;
   return score;
 }
@@ -523,13 +519,12 @@ function buildOutfitReason(outfit: WardrobeItem[], context: OutfitContext, score
   const safeContext = normalizeContext(context);
   const names = safeOutfit.map((item) => item.name).join(", ");
   const style = safeContext.styles.slice(0, 2).join(" and ");
-  const weather = safeContext.weather.join(", ");
   const materials = [...new Set(safeOutfit.map((item) => normalize(item.material)).filter(Boolean))].slice(0, 2);
-  const textures = [...new Set(safeOutfit.map((item) => item.texture).filter(Boolean))].slice(0, 2);
-  const vibes = [...new Set(safeOutfit.map((item) => item.vibe).filter(Boolean))].slice(0, 2);
+  const textures = [...new Set(safeOutfit.flatMap((item) => item.textures).filter(Boolean))].slice(0, 2);
+  const vibes = [...new Set(safeOutfit.flatMap((item) => item.vibes).filter(Boolean))].slice(0, 2);
   const textureLine = textures.length ? ` Texture-wise, ${textures.join(" and ")} pieces support a ${vibes.join(" and ") || style || "balanced"} vibe.` : "";
   const materialLine = materials.length ? ` ${materials.join(" and ")} materials help the outfit feel coherent.` : "";
-  return `${names || "These pieces"} balance ${style || "classic"} styling with ${weather || "mild"} conditions.${textureLine}${materialLine} The ${score}% score reflects color, season, weather, formality, texture, vibe, and completeness.`;
+  return `${names || "These pieces"} balance ${style || "classic"} styling with your selected season and formality.${textureLine}${materialLine} The ${score}% score reflects color, season, formality, texture, vibe, material, fit, and completeness.`;
 }
 
 function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit = 4): Outfit[] {
@@ -575,7 +570,7 @@ function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit
     if (!useDress && top) outfit.push(top);
     if (!useDress && bottom) outfit.push(bottom);
 
-    const needsOuterwear = safeContext.weather.includes("cold") || safeContext.weather.includes("rainy") || safeContext.season === "winter";
+    const needsOuterwear = safeContext.season === "winter" || safeContext.occasion.includes("rain");
     const outerwear = groups.outerwear[i % Math.max(groups.outerwear.length, 1)];
     if (outerwear && (needsOuterwear || itemFitScore(outerwear, safeContext) > 60)) outfit.push(outerwear);
 
@@ -630,6 +625,10 @@ export default function NiceOutfitApp() {
   const [generated, setGenerated] = useState<Outfit[]>([]);
   const [activeFilter, setActiveFilter] = useState<Category | "all">("all");
   const [customStyleTags, setCustomStyleTags] = useState<StyleTag[]>([]);
+  const [customTextures, setCustomTextures] = useState<Texture[]>([]);
+  const [customFits, setCustomFits] = useState<Fit[]>([]);
+  const [customVibes, setCustomVibes] = useState<Vibe[]>([]);
+  const [customFormalities, setCustomFormalities] = useState<Formality[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -638,6 +637,10 @@ export default function NiceOutfitApp() {
     setWardrobe(stored.wardrobe);
     setSavedOutfits(stored.savedOutfits);
     setCustomStyleTags(stored.customStyleTags);
+    setCustomTextures(stored.customTextures);
+    setCustomFits(stored.customFits);
+    setCustomVibes(stored.customVibes);
+    setCustomFormalities(stored.customFormalities);
     setHydrated(true);
 
     if ("serviceWorker" in navigator) {
@@ -648,11 +651,11 @@ export default function NiceOutfitApp() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ wardrobe, savedOutfits, customStyleTags }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities }));
     } catch {
       undefined;
     }
-  }, [wardrobe, savedOutfits, customStyleTags, hydrated]);
+  }, [wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities, hydrated]);
 
   const filteredWardrobe = useMemo(
     () => (activeFilter === "all" ? wardrobe : wardrobe.filter((item) => item.category === activeFilter)),
@@ -661,6 +664,10 @@ export default function NiceOutfitApp() {
 
   const featured = useMemo(() => generateOutfits(wardrobe, quickContexts[0], 1)[0], [wardrobe]);
   const selectableStyleTags = useMemo(() => [...new Set([...defaultStyleTags, ...customStyleTags])], [customStyleTags]);
+  const selectableTextures = useMemo(() => [...new Set([...defaultTextures, ...customTextures])], [customTextures]);
+  const selectableFits = useMemo(() => [...new Set([...defaultFits, ...customFits])], [customFits]);
+  const selectableVibes = useMemo(() => [...new Set([...defaultVibes, ...customVibes])], [customVibes]);
+  const selectableFormalities = useMemo(() => [...new Set([...defaultFormalities, ...customFormalities])], [customFormalities]);
 
   const updateDraft = (field: keyof typeof emptyDraft, value: string | string[]) => {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -705,9 +712,9 @@ export default function NiceOutfitApp() {
       mainColor: draft.mainColor.trim() || "neutral",
       material: draft.material.trim(),
       seasons: draft.seasons.length ? draft.seasons : ["all-season"],
-      texture: draft.texture,
+      textures: draft.textures.length ? draft.textures : ["smooth"],
       fit: draft.fit,
-      vibe: draft.vibe,
+      vibes: draft.vibes.length ? draft.vibes : ["classic"],
       createdAt: new Date().toISOString()
     };
     setWardrobe((items) => [item, ...items]);
@@ -727,7 +734,7 @@ export default function NiceOutfitApp() {
   };
 
   const exportBackup = () => {
-    const blob = new Blob([JSON.stringify({ wardrobe, savedOutfits, customStyleTags }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ wardrobe, savedOutfits, customStyleTags, customTextures, customFits, customVibes, customFormalities }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -756,12 +763,24 @@ export default function NiceOutfitApp() {
             .filter((outfit): outfit is SavedOutfit => Boolean(outfit)),
           customStyleTags: safeArray<unknown>((raw as Partial<NiceOutfitData>)?.customStyleTags)
             .map((entry) => normalize(entry))
-            .filter((entry) => entry && !defaultStyleTags.includes(entry))
+            .filter((entry) => entry && !defaultStyleTags.includes(entry)),
+          customTextures: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customTextures).filter((entry) => !defaultTextures.includes(entry)),
+          customFits: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customFits).filter((entry) => !defaultFits.includes(entry)),
+          customVibes: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customVibes).filter((entry) => !defaultVibes.includes(entry)),
+          customFormalities: normalizeOptionList((raw as Partial<NiceOutfitData>)?.customFormalities).filter((entry) => !defaultFormalities.includes(entry))
         };
         const assignedTags = data.wardrobe.flatMap((item) => item.styleTags).filter((tag) => !defaultStyleTags.includes(tag) && tag !== "parisian");
+        const assignedTextures = data.wardrobe.flatMap((item) => item.textures).filter((tag) => !defaultTextures.includes(tag));
+        const assignedFits = data.wardrobe.map((item) => item.fit).filter((tag) => !defaultFits.includes(tag));
+        const assignedVibes = data.wardrobe.flatMap((item) => item.vibes).filter((tag) => !defaultVibes.includes(tag));
+        const assignedFormalities = data.wardrobe.map((item) => item.formality).filter((tag) => !defaultFormalities.includes(tag));
         setWardrobe(data.wardrobe);
         setSavedOutfits(data.savedOutfits);
         setCustomStyleTags([...new Set([...data.customStyleTags, ...assignedTags])]);
+        setCustomTextures([...new Set([...data.customTextures, ...assignedTextures])]);
+        setCustomFits([...new Set([...data.customFits, ...assignedFits])]);
+        setCustomVibes([...new Set([...data.customVibes, ...assignedVibes])]);
+        setCustomFormalities([...new Set([...data.customFormalities, ...assignedFormalities])]);
       } catch {
         alert("This does not look like a NiceOutfit backup.");
       }
@@ -783,6 +802,10 @@ export default function NiceOutfitApp() {
     setWardrobe([]);
     setSavedOutfits([]);
     setCustomStyleTags([]);
+    setCustomTextures([]);
+    setCustomFits([]);
+    setCustomVibes([]);
+    setCustomFormalities([]);
     setGenerated([]);
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -911,12 +934,38 @@ export default function NiceOutfitApp() {
                   <Field label="Main color" value={draft.mainColor} onChange={(value) => updateDraft("mainColor", value)} placeholder="black, camel, rose" datalist={colorFamilies} />
                   <Field label="Secondary color" value={draft.secondaryColor} onChange={(value) => updateDraft("secondaryColor", value)} placeholder="optional" datalist={colorFamilies} />
                   <Field label="Fabric / material" value={draft.material} onChange={(value) => updateDraft("material", value)} placeholder="cotton, wool, leather" />
-                  <SelectField label="Texture / Finish" value={draft.texture} options={textureOptions} onChange={(value) => updateDraft("texture", value as Texture)} />
-                  <SelectField label="Fit / Shape" value={draft.fit} options={fitOptions} onChange={(value) => updateDraft("fit", value as Fit)} />
-                  <SelectField label="Vibe" value={draft.vibe} options={vibeOptions} onChange={(value) => updateDraft("vibe", value as Vibe)} />
-                  <SelectField label="Formality" value={draft.formality} options={formalities} onChange={(value) => updateDraft("formality", value as Formality)} />
                 </div>
                 <TagPicker label="Seasons" values={seasons} selected={draft.seasons} onChange={(values) => updateDraft("seasons", values.length ? values : ["all-season"])} />
+                <CustomOptionPicker
+                  label="Texture / Finish"
+                  values={selectableTextures}
+                  selected={draft.textures}
+                  multiple
+                  onChange={(values) => updateDraft("textures", values.length ? values : ["smooth"])}
+                  onAdd={(value) => setCustomTextures((items) => [...new Set([...items, value])])}
+                />
+                <CustomOptionPicker
+                  label="Fit / Shape"
+                  values={selectableFits}
+                  selected={[draft.fit]}
+                  onChange={(values) => updateDraft("fit", values[0] || "regular")}
+                  onAdd={(value) => setCustomFits((items) => [...new Set([...items, value])])}
+                />
+                <CustomOptionPicker
+                  label="Vibe"
+                  values={selectableVibes}
+                  selected={draft.vibes}
+                  multiple
+                  onChange={(values) => updateDraft("vibes", values.length ? values : ["classic"])}
+                  onAdd={(value) => setCustomVibes((items) => [...new Set([...items, value])])}
+                />
+                <CustomOptionPicker
+                  label="Formality"
+                  values={selectableFormalities}
+                  selected={[draft.formality]}
+                  onChange={(values) => updateDraft("formality", values[0] || "smart casual")}
+                  onAdd={(value) => setCustomFormalities((items) => [...new Set([...items, value])])}
+                />
                 <StyleTagManager
                   values={selectableStyleTags}
                   customValues={customStyleTags}
@@ -925,7 +974,6 @@ export default function NiceOutfitApp() {
                   onAdd={(tag) => setCustomStyleTags((tags) => [...new Set([...tags, tag])])}
                   onDelete={(tag) => setCustomStyleTags((tags) => tags.filter((entry) => entry !== tag))}
                 />
-                <TagPicker label="Weather tags" values={weatherTags} selected={draft.weatherTags} onChange={(values) => updateDraft("weatherTags", values)} />
                 <label className="mt-4 block text-sm font-semibold text-ink/70">
                   Notes
                   <textarea
@@ -992,7 +1040,7 @@ export default function NiceOutfitApp() {
                   <OutfitCard key={outfit.id} outfit={outfit} onSave={saveOutfit} saved={savedOutfits.some((item) => item.id === outfit.id)} />
                 ))
               ) : (
-                <EmptyState title="Ready when your wardrobe is" body="Choose a quick idea or describe the plan. NiceOutfit will infer weather, formality, season, and style from local rules." action="Try Work" onClick={() => runRecommendation(quickContexts[0])} />
+                <EmptyState title="Ready when your wardrobe is" body="Choose a quick idea or describe the plan. NiceOutfit will infer formality, season, and style from local rules." action="Try Work" onClick={() => runRecommendation(quickContexts[0])} />
               )}
             </section>
           </div>
@@ -1112,7 +1160,7 @@ function ItemCard({ item, onDelete }: { item: WardrobeItem; onDelete?: () => voi
           )}
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
-          {[safeItem.mainColor, safeItem.formality, safeItem.seasons.join(" + "), safeItem.texture, safeItem.vibe].filter(Boolean).map((tag) => (
+          {[safeItem.mainColor, safeItem.formality, safeItem.seasons.join(" + "), safeItem.textures.join(" + "), safeItem.vibes.join(" + ")].filter(Boolean).map((tag) => (
             <span key={tag} className="rounded-full bg-ivory px-2 py-1 text-[11px] font-semibold text-ink/60">
               {tag}
             </span>
@@ -1280,6 +1328,78 @@ function TagPicker<T extends string>({
   );
 }
 
+function CustomOptionPicker({
+  label,
+  values,
+  selected,
+  multiple,
+  onChange,
+  onAdd
+}: {
+  label: string;
+  values: string[];
+  selected: string[];
+  multiple?: boolean;
+  onChange: (values: string[]) => void;
+  onAdd: (value: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [newValue, setNewValue] = useState("");
+
+  const toggle = (value: string) => {
+    if (multiple) {
+      onChange(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+      return;
+    }
+    onChange([value]);
+  };
+
+  const addValue = () => {
+    const cleanValue = normalize(newValue);
+    if (!cleanValue) return;
+    onAdd(cleanValue);
+    onChange(multiple ? [...new Set([...selected, cleanValue])] : [cleanValue]);
+    setNewValue("");
+    setAdding(false);
+  };
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-ink/70">{label}</p>
+        <button type="button" onClick={() => setAdding((value) => !value)} className="grid size-8 place-items-center rounded-full bg-ivory text-sm font-bold text-ink/70">
+          +
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {values.map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => toggle(value)}
+            className={`rounded-full px-3 py-2 text-sm font-semibold ${selected.includes(value) ? "bg-ink text-ivory" : "bg-ivory text-ink/65"}`}
+          >
+            {titleCase(value)}
+          </button>
+        ))}
+      </div>
+      {adding && (
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newValue}
+            onChange={(event) => setNewValue(event.target.value)}
+            placeholder={`Add ${label.toLowerCase()}`}
+            className="min-w-0 flex-1 rounded-full border border-black/10 bg-ivory/60 px-4 py-3 outline-none focus:border-rose"
+          />
+          <button type="button" onClick={addValue} className="rounded-full bg-ink px-4 py-3 text-sm font-semibold text-ivory">
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StyleTagManager({
   values,
   customValues,
@@ -1358,8 +1478,8 @@ function OnboardingTips() {
     <div className="grid gap-3 md:grid-cols-3">
       {[
         { icon: Camera, title: "Photograph pieces", body: "Use a clean background when possible; NiceOutfit will frame every upload consistently." },
-        { icon: BriefcaseBusiness, title: "Add useful tags", body: "Season, formality, weather, and style tags make recommendations sharper." },
-        { icon: CloudRain, title: "Plan for weather", body: "Rain, cold, wind, and heat tags help the local engine build practical outfits." },
+        { icon: BriefcaseBusiness, title: "Add useful tags", body: "Season, formality, texture, vibe, and style tags make recommendations sharper." },
+        { icon: CloudRain, title: "Plan with seasons", body: "Spring, summer, fall, and winter selections help the local engine build practical outfits." },
         { icon: Luggage, title: "Save your favorites", body: "Generated outfits remain temporary until you save them." }
       ].map(({ icon: Icon, title, body }) => (
         <article key={title} className="rounded-[1.5rem] bg-white p-5 shadow-soft">
