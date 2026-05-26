@@ -245,6 +245,11 @@ const titleCase = (value: string) => value.replace(/\b\w/g, (letter) => letter.t
 const overlaps = <T,>(a: T[], b: T[]) => a.some((item) => b.includes(item));
 const normalize = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const fallbackData: NiceOutfitData = { wardrobe: [], savedOutfits: [], customStyleTags: [] };
+const formatDate = (value?: string) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+};
 
 function safeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -446,7 +451,8 @@ function colorScore(item: WardrobeItem, context: OutfitContext) {
 }
 
 function materialHarmonyScore(items: WardrobeItem[]) {
-  const materials = items.map((item) => normalize(item.material));
+  const safeItems = Array.isArray(items) ? items : [];
+  const materials = safeItems.map((item) => normalize(item.material));
   const has = (term: string) => materials.some((material) => material.includes(term));
   let score = 0;
   if (has("cotton") && has("linen")) score += 8;
@@ -454,75 +460,89 @@ function materialHarmonyScore(items: WardrobeItem[]) {
   if (has("wool") && has("leather")) score += 8;
   if (has("denim") && has("cotton")) score += 7;
   if (has("linen") && has("cotton")) score += 6;
-  if ((has("wool") || has("heavy")) && items.some((item) => item.weatherTags.includes("hot"))) score -= 10;
+  if ((has("wool") || has("heavy")) && safeItems.some((item) => normalizeWeatherList(item.weatherTags).includes("hot"))) score -= 10;
   if (has("synthetic") || has("polyester")) {
-    if (items.some((item) => item.vibe === "elegant" && item.formality === "formal")) score -= 6;
+    if (safeItems.some((item) => item.vibe === "elegant" && item.formality === "formal")) score -= 6;
   }
   return score;
 }
 
 function textureHarmonyScore(items: WardrobeItem[]) {
-  const textures = items.map((item) => item.texture);
+  const safeItems = Array.isArray(items) ? items : [];
+  const textures = safeItems.map((item) => item.texture);
   const has = (texture: Texture) => textures.includes(texture);
   let score = 0;
-  if (has("knit") && (has("soft") || items.some((item) => item.fit === "relaxed"))) score += 8;
-  if (has("structured") && items.some((item) => item.fit === "tailored")) score += 9;
+  if (has("knit") && (has("soft") || safeItems.some((item) => item.fit === "relaxed"))) score += 8;
+  if (has("structured") && safeItems.some((item) => item.fit === "tailored")) score += 9;
   if (has("crisp") && (has("smooth") || has("structured"))) score += 7;
-  if (has("flowy") && items.some((item) => item.vibe === "elegant" || item.styleTags.includes("romantic"))) score += 7;
+  if (has("flowy") && safeItems.some((item) => item.vibe === "elegant" || normalizeStyleList(item.styleTags).includes("romantic"))) score += 7;
   if (has("lounge") && has("shiny")) score -= 10;
-  if (has("rugged") && has("flowy") && !items.some((item) => item.vibe === "streetwear" || item.styleTags.includes("edgy"))) score -= 7;
+  if (has("rugged") && has("flowy") && !safeItems.some((item) => item.vibe === "streetwear" || normalizeStyleList(item.styleTags).includes("edgy"))) score -= 7;
   return score;
 }
 
 function vibeHarmonyScore(items: WardrobeItem[], context: OutfitContext) {
-  const vibes = items.map((item) => item.vibe);
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeContext = normalizeContext(context);
+  const vibes = safeItems.map((item) => item.vibe);
   let score = 0;
-  if (vibes.some((vibe) => context.styles.includes(vibe))) score += 8;
+  if (vibes.some((vibe) => safeContext.styles.includes(vibe))) score += 8;
   if (vibes.every((vibe) => ["classic", "minimal", "elegant", "elevated casual"].includes(vibe))) score += 6;
   if (vibes.every((vibe) => ["casual", "elevated casual", "classic", "minimal", "lounge"].includes(vibe))) score += 5;
-  if (vibes.includes("lounge") && items.some((item) => item.formality === "formal" || item.fit === "tailored")) score -= 10;
-  if (vibes.includes("sporty") && vibes.includes("elegant") && context.formality === "formal") score -= 8;
+  if (vibes.includes("lounge") && safeItems.some((item) => item.formality === "formal" || item.fit === "tailored")) score -= 10;
+  if (vibes.includes("sporty") && vibes.includes("elegant") && safeContext.formality === "formal") score -= 8;
   return score;
 }
 
 function itemFitScore(item: WardrobeItem, context: OutfitContext) {
+  const safeItem = normalizeWardrobeItem(item) ?? normalizeWardrobeItem({}, 0);
+  const safeContext = normalizeContext(context);
+  if (!safeItem) return 0;
   let score = 0;
-  score += colorScore(item, context);
-  if (context.season && (item.seasons.includes(context.season) || item.seasons.includes("all-season"))) score += 18;
-  if (!context.season || item.seasons.includes("all-season")) score += 7;
-  if (context.formality && item.formality === context.formality) score += 18;
-  if (context.formality === "smart casual" && ["casual", "work"].includes(item.formality)) score += 8;
-  if (!context.formality) score += 8;
-  if (overlaps(item.weatherTags, context.weather)) score += 18;
-  if (overlaps(item.styleTags, context.styles)) score += 18;
-  if (context.styles.includes(item.vibe)) score += 10;
-  if (item.texture === "structured" && ["work", "formal"].includes(context.formality ?? "")) score += 6;
-  if (item.texture === "lounge" && ["work", "formal"].includes(context.formality ?? "")) score -= 8;
-  if (context.weather.includes("hot") && ["knit", "rugged", "structured"].includes(item.texture)) score -= 6;
-  if (context.weather.includes("cold") && ["knit", "soft", "structured"].includes(item.texture)) score += 6;
-  if (context.include.includes(item.category)) score += 8;
+  score += colorScore(safeItem, safeContext);
+  if (safeContext.season && (safeItem.seasons.includes(safeContext.season) || safeItem.seasons.includes("all-season"))) score += 18;
+  if (!safeContext.season || safeItem.seasons.includes("all-season")) score += 7;
+  if (safeContext.formality && safeItem.formality === safeContext.formality) score += 18;
+  if (safeContext.formality === "smart casual" && ["casual", "work"].includes(safeItem.formality)) score += 8;
+  if (!safeContext.formality) score += 8;
+  if (overlaps(safeItem.weatherTags, safeContext.weather)) score += 18;
+  if (overlaps(safeItem.styleTags, safeContext.styles)) score += 18;
+  if (safeContext.styles.includes(safeItem.vibe)) score += 10;
+  if (safeItem.texture === "structured" && ["work", "formal"].includes(safeContext.formality ?? "")) score += 6;
+  if (safeItem.texture === "lounge" && ["work", "formal"].includes(safeContext.formality ?? "")) score -= 8;
+  if (safeContext.weather.includes("hot") && ["knit", "rugged", "structured"].includes(safeItem.texture)) score -= 6;
+  if (safeContext.weather.includes("cold") && ["knit", "soft", "structured"].includes(safeItem.texture)) score += 6;
+  if (safeContext.include.includes(safeItem.category)) score += 8;
   return score;
 }
 
 function buildOutfitReason(outfit: WardrobeItem[], context: OutfitContext, score: number) {
-  const names = outfit.map((item) => item.name).join(", ");
-  const style = context.styles.slice(0, 2).join(" and ");
-  const weather = context.weather.join(", ");
-  const materials = [...new Set(outfit.map((item) => normalize(item.material)).filter(Boolean))].slice(0, 2);
-  const textures = [...new Set(outfit.map((item) => item.texture).filter(Boolean))].slice(0, 2);
-  const vibes = [...new Set(outfit.map((item) => item.vibe).filter(Boolean))].slice(0, 2);
+  const safeOutfit = safeArray<unknown>(outfit)
+    .map((item, index) => normalizeWardrobeItem(item, index))
+    .filter((item): item is WardrobeItem => Boolean(item));
+  const safeContext = normalizeContext(context);
+  const names = safeOutfit.map((item) => item.name).join(", ");
+  const style = safeContext.styles.slice(0, 2).join(" and ");
+  const weather = safeContext.weather.join(", ");
+  const materials = [...new Set(safeOutfit.map((item) => normalize(item.material)).filter(Boolean))].slice(0, 2);
+  const textures = [...new Set(safeOutfit.map((item) => item.texture).filter(Boolean))].slice(0, 2);
+  const vibes = [...new Set(safeOutfit.map((item) => item.vibe).filter(Boolean))].slice(0, 2);
   const textureLine = textures.length ? ` Texture-wise, ${textures.join(" and ")} pieces support a ${vibes.join(" and ") || style || "balanced"} vibe.` : "";
   const materialLine = materials.length ? ` ${materials.join(" and ")} materials help the outfit feel coherent.` : "";
   return `${names || "These pieces"} balance ${style || "classic"} styling with ${weather || "mild"} conditions.${textureLine}${materialLine} The ${score}% score reflects color, season, weather, formality, texture, vibe, and completeness.`;
 }
 
 function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit = 4): Outfit[] {
-  if (!wardrobe.length) return [];
+  const safeWardrobe = safeArray<unknown>(wardrobe)
+    .map((item, index) => normalizeWardrobeItem(item, index))
+    .filter((item): item is WardrobeItem => Boolean(item));
+  const safeContext = normalizeContext(context);
+  if (!safeWardrobe.length) return [];
 
   const byCategory = (category: Category) =>
-    wardrobe
+    safeWardrobe
       .filter((item) => item.category === category)
-      .sort((a, b) => itemFitScore(b, context) - itemFitScore(a, context));
+      .sort((a, b) => itemFitScore(b, safeContext) - itemFitScore(a, safeContext));
 
   const groups = {
     tops: byCategory("tops"),
@@ -539,7 +559,7 @@ function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit
   };
 
   const accessoryPool = [...groups.scarves, ...groups.ties, ...groups.belts, ...groups.jewelry, ...groups.bags, ...groups.other].sort(
-    (a, b) => itemFitScore(b, context) - itemFitScore(a, context)
+    (a, b) => itemFitScore(b, safeContext) - itemFitScore(a, safeContext)
   );
 
   const combinations: WardrobeItem[][] = [];
@@ -555,15 +575,15 @@ function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit
     if (!useDress && top) outfit.push(top);
     if (!useDress && bottom) outfit.push(bottom);
 
-    const needsOuterwear = context.weather.includes("cold") || context.weather.includes("rainy") || context.season === "winter";
+    const needsOuterwear = safeContext.weather.includes("cold") || safeContext.weather.includes("rainy") || safeContext.season === "winter";
     const outerwear = groups.outerwear[i % Math.max(groups.outerwear.length, 1)];
-    if (outerwear && (needsOuterwear || itemFitScore(outerwear, context) > 60)) outfit.push(outerwear);
+    if (outerwear && (needsOuterwear || itemFitScore(outerwear, safeContext) > 60)) outfit.push(outerwear);
 
     const shoes = groups.shoes[i % Math.max(groups.shoes.length, 1)];
     if (shoes) outfit.push(shoes);
 
     const bag = groups.bags[i % Math.max(groups.bags.length, 1)];
-    if (bag && (context.include.includes("bags") || context.occasion.includes("travel") || i % 2 === 0)) outfit.push(bag);
+    if (bag && (safeContext.include.includes("bags") || safeContext.occasion.includes("travel") || i % 2 === 0)) outfit.push(bag);
 
     const accessory = accessoryPool[(i + 1) % Math.max(accessoryPool.length, 1)];
     if (accessory && !outfit.some((item) => item.id === accessory.id)) outfit.push(accessory);
@@ -573,22 +593,22 @@ function generateOutfits(wardrobe: WardrobeItem[], context: OutfitContext, limit
   }
 
   const scored = combinations.map((items, index) => {
-    const itemAverage = items.reduce((sum, item) => sum + itemFitScore(item, context), 0) / items.length;
+    const itemAverage = items.reduce((sum, item) => sum + itemFitScore(item, safeContext), 0) / items.length;
     const hasBase = items.some((item) => item.category === "dresses") || (items.some((item) => item.category === "tops") && items.some((item) => item.category === "bottoms"));
     const hasShoes = items.some((item) => item.category === "shoes");
     const hasLayer = items.some((item) => item.category === "outerwear");
     const hasAccessory = items.some((item) => !["tops", "bottoms", "dresses", "outerwear", "shoes"].includes(item.category));
     const completeness = (hasBase ? 18 : 4) + (hasShoes ? 12 : 0) + (hasAccessory ? 8 : 0) + (hasLayer ? 6 : 0);
-    const harmony = materialHarmonyScore(items) + textureHarmonyScore(items) + vibeHarmonyScore(items, context);
+    const harmony = materialHarmonyScore(items) + textureHarmonyScore(items) + vibeHarmonyScore(items, safeContext);
     const score = Math.max(1, Math.min(99, Math.round(itemAverage * 0.64 + completeness + harmony)));
     return {
       id: uid(),
-      name: `${context.label} Look ${index + 1}`,
-      occasion: context.occasion,
+      name: `${safeContext.label} Look ${index + 1}`,
+      occasion: safeContext.occasion,
       items,
       score,
-      reason: buildOutfitReason(items, context, score),
-      context
+      reason: buildOutfitReason(items, safeContext, score),
+      context: safeContext
     };
   });
 
@@ -1074,23 +1094,25 @@ function CatalogPreview({ image, name }: { image?: string; name: string }) {
 }
 
 function ItemCard({ item, onDelete }: { item: WardrobeItem; onDelete?: () => void }) {
+  const safeItem = normalizeWardrobeItem(item) ?? normalizeWardrobeItem({}, 0);
+  if (!safeItem) return null;
   return (
     <article className="rounded-[1.35rem] bg-white p-3 shadow-soft">
-      <CatalogPreview image={item.image} name={item.name || "Wardrobe item"} />
+      <CatalogPreview image={safeItem.image} name={safeItem.name || "Wardrobe item"} />
       <div className="mt-3">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="font-semibold leading-tight">{item.name}</h3>
-            <p className="text-sm text-ink/55">{titleCase(item.category)}</p>
+            <h3 className="font-semibold leading-tight">{safeItem.name}</h3>
+            <p className="text-sm text-ink/55">{titleCase(safeItem.category)}</p>
           </div>
           {onDelete && (
-            <button onClick={onDelete} className="grid size-8 shrink-0 place-items-center rounded-full bg-ivory text-ink/60" aria-label={`Delete ${item.name}`}>
+            <button onClick={onDelete} className="grid size-8 shrink-0 place-items-center rounded-full bg-ivory text-ink/60" aria-label={`Delete ${safeItem.name}`}>
               <Trash2 size={15} />
             </button>
           )}
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
-          {[item.mainColor, item.formality, item.seasons.join(" + "), item.texture, item.vibe].filter(Boolean).map((tag) => (
+          {[safeItem.mainColor, safeItem.formality, safeItem.seasons.join(" + "), safeItem.texture, safeItem.vibe].filter(Boolean).map((tag) => (
             <span key={tag} className="rounded-full bg-ivory px-2 py-1 text-[11px] font-semibold text-ink/60">
               {tag}
             </span>
@@ -1116,21 +1138,25 @@ function OutfitCard({
   onDelete?: () => void;
   onRegenerate?: () => void;
 }) {
+  const safeItems = safeArray<unknown>(outfit.items)
+    .map((item, index) => normalizeWardrobeItem(item, index))
+    .filter((item): item is WardrobeItem => Boolean(item));
+  const savedDate = formatDate(savedAt);
   return (
     <article className="rounded-[1.5rem] bg-white p-4 shadow-soft">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.18em] text-rose">{outfit.occasion}</p>
-          <h3 className="font-serif text-3xl font-semibold">{outfit.name}</h3>
-          {savedAt && <p className="text-sm text-ink/50">Saved {new Date(savedAt).toLocaleDateString()}</p>}
+          <p className="text-sm uppercase tracking-[0.18em] text-rose">{outfit.occasion || "outfit"}</p>
+          <h3 className="font-serif text-3xl font-semibold">{outfit.name || "Outfit"}</h3>
+          {savedDate && <p className="text-sm text-ink/50">Saved {savedDate}</p>}
         </div>
         <div className="grid size-16 shrink-0 place-items-center rounded-full bg-ivory text-center">
-          <span className="font-serif text-2xl font-semibold">{outfit.score}</span>
+          <span className="font-serif text-2xl font-semibold">{Number.isFinite(outfit.score) ? outfit.score : 0}</span>
           <span className="-mt-5 text-[10px] font-bold uppercase text-ink/45">score</span>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
-        {outfit.items.map((item) => (
+        {safeItems.map((item) => (
           <div key={item.id}>
             <CatalogPreview image={item.image} name={item.name || "Outfit item"} />
             <p className="mt-1 truncate text-xs font-semibold">{item.name}</p>
